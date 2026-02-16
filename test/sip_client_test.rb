@@ -65,7 +65,7 @@ class BaresipTest < Minitest::Test
   end
 
   def test_format_number_strips_non_digits
-    formatted = @client.send(:format_number, "(604) 779-7652")
+    formatted = @client.send(:format_number, "(555) 010-0100")
     assert_equal "15550100", formatted
   end
 

@@ -1,6 +1,8 @@
-# garbo-voice-agent
+# Voice Agent
 
 AI voice agent that answers phone calls. Four pluggable pillars — swap any piece.
+
+Read more: [michaelwood.com](https://michaelwood.com)
 
 ## Architecture
 
