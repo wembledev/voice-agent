@@ -4,7 +4,7 @@ require 'net/http'
 require 'uri'
 require 'json'
 
-# SMS client for garbo-voice-agent (uses voip.ms API)
+# SMS client for voice-agent (uses voip.ms API)
 class SMS
   class Error < StandardError; end
 

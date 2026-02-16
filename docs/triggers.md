@@ -68,7 +68,7 @@ Function calling via Grok's native tools:
 
 ---
 
-## Design: garbo-voice-agent Trigger System
+## Design: Voice Agent Trigger System
 
 ### Goals
 

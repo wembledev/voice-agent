@@ -168,10 +168,10 @@ The `monitors/` folder contains a shell-based monitoring script for production u
 crontab -e
 
 # Add this line
-*/5 * * * * ~/Projects/garbo-voice-agent/monitors/monitor >> ~/clawd/logs/monitor-voice.log 2>&1
+*/5 * * * * ~/Projects/voice-agent/monitors/monitor >> ~/clawd/logs/monitor-voice.log 2>&1
 
 # Test manually
-~/Projects/garbo-voice-agent/monitors/monitor
+~/Projects/voice-agent/monitors/monitor
 ```
 
 See [monitors/README.md](monitors/README.md) for full details.

@@ -1,6 +1,6 @@
-# Garbo Voice Agent Monitoring
+# Voice Agent Monitoring
 
-Shell-based monitors for garbo-voice-agent. Zero-token monitoring: run checks via system cron, only spawn LLM sessions when alerts are needed.
+Shell-based monitors for voice-agent. Zero-token monitoring: run checks via system cron, only spawn LLM sessions when alerts are needed.
 
 ## Why Shell Monitors?
 
@@ -30,7 +30,7 @@ Every 5 min → Shell script checks directly → Nothing new → Exit silently
 ### `monitor` - Consolidated Voice Agent Monitor
 - **Frequency:** Every 5 minutes (recommended)
 - **Checks:**
-  - **SMS:** voip.ms API for new messages to 604-998-8013
+  - **SMS:** voip.ms API for new messages to your DID
   - **Calls:** voip.ms call logs for missed calls (throttled to 10 min)
   - **Zombies:** Defunct/orphaned bin/call, baresip, Ghostty processes
 - **State files:** `~/clawd/state/{sms,calls}-last-check.txt`
@@ -53,18 +53,18 @@ Every 5 min → Shell script checks directly → Nothing new → Exit silently
 # Add to system crontab
 crontab -e
 
-# Add this line (adjust path if garbo-voice-agent is elsewhere)
-*/5 * * * * ~/Projects/garbo-voice-agent/monitors/monitor >> ~/clawd/logs/monitor-voice.log 2>&1
+# Add this line (adjust path if needed)
+*/5 * * * * ~/Projects/voice-agent/monitors/monitor >> ~/clawd/logs/monitor-voice.log 2>&1
 ```
 
 ### Manual Test
 
 ```bash
 # Ensure script is executable
-chmod +x ~/Projects/garbo-voice-agent/monitors/monitor
+chmod +x ~/Projects/voice-agent/monitors/monitor
 
 # Run manually to test
-~/Projects/garbo-voice-agent/monitors/monitor
+~/Projects/voice-agent/monitors/monitor
 
 # Check logs
 tail -f ~/clawd/logs/monitor-voice.log
@@ -131,7 +131,7 @@ The monitor kills:
 - Prevents resource leaks and port conflicts
 
 **Safety:**
-- Only kills garbo-voice-agent related processes
+- Only kills voice-agent related processes
 - Checks parent-child relationships before killing
 - Logs all kills to monitor-voice.log
 
@@ -199,10 +199,10 @@ grep ZOMBIES ~/clawd/logs/monitor-voice.log
 crontab -l | grep monitor
 
 # Check if script is executable
-ls -la ~/Projects/garbo-voice-agent/monitors/monitor
+ls -la ~/Projects/voice-agent/monitors/monitor
 
 # Test manually
-~/Projects/garbo-voice-agent/monitors/monitor
+~/Projects/voice-agent/monitors/monitor
 ```
 
 ### OpenClaw spawn failing

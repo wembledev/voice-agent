@@ -1,14 +1,14 @@
-# SMS Integration for garbo-voice-agent
+# SMS Integration for Voice Agent
 
 ## Overview
-Send and receive SMS messages using the voip.ms API from within garbo-voice-agent.
+Send and receive SMS messages using the voip.ms API from within voice-agent.
 
 ## Quick Start
 
 ### Send SMS via CLI:
 ```bash
-cd ~/Projects/garbo-voice-agent
-bin/sms 5550100 "Hello from Garbo!"
+cd ~/Projects/voice-agent
+bin/sms 5550100 "Hello!"
 ```
 
 ### Send SMS from Ruby code:
