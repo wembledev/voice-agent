@@ -1,0 +1,120 @@
+#!/bin/bash
+# Garbo Voice Agent Monitor - SMS, calls, and zombie process detection
+# Runs every 5 minutes, spawns OpenClaw sessions only when needed
+
+STATE_DIR="$HOME/clawd/state"
+mkdir -p "$STATE_DIR"
+
+# Load credentials from .env.local
+if [ -f "$HOME/Projects/garbo-voice-agent/.env.local" ]; then
+  source "$HOME/Projects/garbo-voice-agent/.env.local"
+fi
+
+VOIPMS_USER="${VOIPMS_API_USERNAME:-you@example.com}"
+VOIPMS_PASS="${VOIPMS_API_PASSWORD:-your-password}"
+VOIPMS_DID="${VOIPMS_DID:-6041234567}"
+
+GATEWAY_TOKEN=$(jq -r '.gateway.auth.token' ~/.openclaw/openclaw.json)
+SPAWN_URL="http://localhost:18789/sessions/spawn"
+
+# ============================================================================
+# SMS Monitor
+# ============================================================================
+SMS_STATE="$STATE_DIR/sms-last-check.txt"
+LAST_SMS=$(cat "$SMS_STATE" 2>/dev/null || echo "0")
+
+SMS_RESPONSE=$(curl -s "https://voip.ms/api/v1/rest.php?api_username=$VOIPMS_USER&api_password=$VOIPMS_PASS&method=getSMS&did=$VOIPMS_DID&limit=10&type=1&content_type=json")
+NEW_SMS=$(echo "$SMS_RESPONSE" | jq -r '[.sms[] | select(.date > "'$LAST_SMS'")] | length')
+
+if [ "$NEW_SMS" -gt 0 ]; then
+  echo "[SMS] Found $NEW_SMS new message(s)"
+  curl -s -X POST "$SPAWN_URL" \
+    -H "Authorization: Bearer $GATEWAY_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"task": "New SMS messages received. Fetch recent messages from voip.ms API and announce to Mike via Telegram.", "model": "haiku", "cleanup": "delete"}'
+fi
+date +%s > "$SMS_STATE"
+
+# ============================================================================
+# Missed Calls Monitor (runs every other cycle = 10 min)
+# ============================================================================
+CALLS_STATE="$STATE_DIR/calls-last-check.txt"
+LAST_CALL=$(cat "$CALLS_STATE" 2>/dev/null || echo "0")
+NOW=$(date +%s)
+TEN_MIN=600
+
+# Only check calls every 10 minutes (every other run)
+if [ $((NOW - LAST_CALL)) -ge $TEN_MIN ]; then
+  CALL_RESPONSE=$(curl -s "https://voip.ms/api/v1/rest.php?api_username=$VOIPMS_USER&api_password=$VOIPMS_PASS&method=getCallAccounts&date_from=$(date -u -v-10M +%Y-%m-%d)&date_to=$(date -u +%Y-%m-%d)&content_type=json")
+  MISSED=$(echo "$CALL_RESPONSE" | jq -r '[.calls[] | select(.destination == "'$VOIPMS_DID'" and .disposition == "NO ANSWER")] | length' 2>/dev/null || echo "0")
+  
+  if [ "$MISSED" -gt 0 ]; then
+    echo "[CALLS] Found $MISSED missed call(s)"
+    curl -s -X POST "$SPAWN_URL" \
+      -H "Authorization: Bearer $GATEWAY_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"task": "Missed call detected. Check voip.ms call logs and announce to Mike via Telegram with caller number and time.", "model": "haiku", "cleanup": "delete"}'
+  fi
+  date +%s > "$CALLS_STATE"
+fi
+
+# ============================================================================
+# Zombie Process Detection
+# ============================================================================
+KILLED_ZOMBIES=0
+
+# 1. Kill actual zombie processes (defunct/Z state)
+ZOMBIES=$(ps aux | grep -E 'defunct|<Z>' | grep -E 'bin/call|baresip' | grep -v grep | awk '{print $2}')
+if [ -n "$ZOMBIES" ]; then
+  echo "[ZOMBIES] Found: $ZOMBIES"
+  for pid in $ZOMBIES; do
+    kill -9 $pid 2>/dev/null && KILLED_ZOMBIES=$((KILLED_ZOMBIES + 1))
+  done
+fi
+
+# 2. Kill orphaned baresip (no parent bin/call)
+BARESIP_PIDS=$(ps aux | grep baresip | grep -v grep | awk '{print $2}')
+for bpid in $BARESIP_PIDS; do
+  PARENT=$(ps -o ppid= -p $bpid 2>/dev/null | tr -d ' ')
+  if [ -n "$PARENT" ]; then
+    PARENT_CMD=$(ps -p $PARENT -o comm= 2>/dev/null)
+    if [[ ! "$PARENT_CMD" =~ "ruby" ]] && [[ ! "$PARENT_CMD" =~ "call" ]]; then
+      echo "[ZOMBIES] Orphaned baresip: $bpid"
+      kill -9 $bpid 2>/dev/null && KILLED_ZOMBIES=$((KILLED_ZOMBIES + 1))
+    fi
+  fi
+done
+
+# 3. Kill stuck bin/call processes (>10 min, low CPU)
+ps aux | grep 'bin/call' | grep -v grep | while read -r line; do
+  PID=$(echo "$line" | awk '{print $2}')
+  CPUTIME=$(echo "$line" | awk '{print $10}')
+  ELAPSED=$(ps -p $PID -o etime= 2>/dev/null | tr -d ' ')
+  
+  if [[ "$ELAPSED" =~ ^[0-9][0-9]:[0-9][0-9]:[0-9][0-9] ]]; then
+    if [[ "$CPUTIME" =~ ^0:0[0-5] ]]; then
+      echo "[ZOMBIES] Stuck call: $PID (elapsed: $ELAPSED)"
+      kill -9 $PID 2>/dev/null && KILLED_ZOMBIES=$((KILLED_ZOMBIES + 1))
+    fi
+  fi
+done
+
+# 4. Kill orphaned Ghostty windows (>1hr, no children)
+ps aux | grep Ghostty | grep -v grep | while read -r line; do
+  PID=$(echo "$line" | awk '{print $2}')
+  ELAPSED=$(ps -p $PID -o etime= 2>/dev/null | tr -d ' ')
+  
+  if [[ "$ELAPSED" =~ ^[0-9][0-9]:[0-9][0-9]:[0-9][0-9] ]]; then
+    CHILDREN=$(pgrep -P $PID 2>/dev/null | wc -l)
+    if [ "$CHILDREN" -eq 0 ]; then
+      echo "[ZOMBIES] Orphaned Ghostty: $PID"
+      kill -9 $PID 2>/dev/null && KILLED_ZOMBIES=$((KILLED_ZOMBIES + 1))
+    fi
+  fi
+done
+
+if [ $KILLED_ZOMBIES -gt 0 ]; then
+  echo "[ZOMBIES] Killed $KILLED_ZOMBIES zombie/orphaned process(es)"
+fi
+
+echo "$(date): Monitoring complete"

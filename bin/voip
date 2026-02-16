@@ -1,0 +1,66 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'dotenv'
+Dotenv.load(File.expand_path('../.env.local', __dir__))
+
+require_relative '../lib/config'
+require 'json'
+
+def build_provider
+  kind = Config.fetch(:voip, :provider)
+  case kind
+  when 'voipms'
+    require_relative '../lib/voip_provider/voipms'
+    VoipProvider::Voipms.new
+  else
+    raise "Unknown voip.provider=#{kind}"
+  end
+end
+
+api = build_provider
+command = ARGV[0]
+
+case command
+when 'balance'
+  r = api.balance
+  if r.is_a?(Hash) && r.dig('balance', 'current_balance')
+    puts "Balance: $#{r.dig('balance', 'current_balance')}"
+  else
+    puts JSON.pretty_generate(r)
+  end
+when 'dids', 'numbers'
+  puts JSON.pretty_generate(api.phone_numbers)
+when 'registrations', 'reg'
+  puts JSON.pretty_generate(api.registrations(ARGV[1]))
+when 'raw'
+  # Raw API call (provider-specific): bin/voip raw getMethod param=value
+  method = ARGV[1]
+  params = ARGV[2..].to_h { |a| a.split('=', 2) }
+  puts JSON.pretty_generate(api.call(method, params.transform_keys(&:to_sym)))
+else
+  # Provider-specific commands
+  if api.respond_to?(command&.to_sym)
+    result = api.send(command.to_sym, *ARGV[1..])
+    puts JSON.pretty_generate(result)
+  else
+    provider = Config.fetch(:voip, :provider) rescue 'unknown'
+    puts <<~USAGE
+      Usage: voip <command> [args]
+
+      Common commands:
+        balance              Account balance
+        dids                 List phone numbers
+        registrations [acct] SIP registrations
+
+      Provider-specific (#{provider}):
+        raw <method> [k=v]   Raw API call
+
+      Any method on the provider class can also be called directly:
+        servers [pop]        Server list (voipms)
+        subaccounts          Sub-accounts (voipms)
+        pops                 Points of presence (voipms)
+    USAGE
+    exit 1
+  end
+end

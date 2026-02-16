@@ -1,0 +1,5 @@
+.env.local
+tmp/
+logs/
+Gemfile.lock
+*.so

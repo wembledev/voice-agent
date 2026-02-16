@@ -1,0 +1,213 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'dotenv'
+Dotenv.load(File.expand_path('../.env.local', __dir__))
+
+require_relative '../lib/config'
+require 'net/http'
+require 'json'
+require 'uri'
+
+pass = 0
+fail_count = 0
+
+def check(label)
+  ok, detail = yield
+  if ok
+    puts "  \e[32m✓\e[0m #{label}"
+    [true, detail]
+  else
+    puts "  \e[31m✗\e[0m #{label} — #{detail}"
+    [false, detail]
+  end
+rescue => e
+  puts "  \e[31m✗\e[0m #{label} — #{e.message}"
+  [false, e.message]
+end
+
+# ---------- 1. Ruby version ----------
+puts "\e[1mRuby\e[0m"
+ok, = check('Ruby 4.0.1 installed') do
+  version = RUBY_VERSION
+  [version == '4.0.1', "found #{version}"]
+end
+ok ? pass += 1 : fail_count += 1
+
+# ---------- 2. Config ----------
+puts "\n\e[1mConfig\e[0m"
+ok, = check('config/default.yml loads') do
+  Config.load!
+  [true, nil]
+end
+ok ? pass += 1 : fail_count += 1
+
+# ---------- 3. SIP Client ----------
+sip_client = Config.fetch(:sip, :client) rescue 'unknown'
+puts "\n\e[1mSIP Client (#{sip_client})\e[0m"
+
+if sip_client == 'baresip'
+  ok, = check('baresip installed') do
+    output = `baresip -h 2>&1`
+    [$?.success? || output.include?('baresip'), 'not found in PATH']
+  end
+  ok ? pass += 1 : fail_count += 1
+
+  port = (Config.fetch(:sip, :ctrl_port) rescue 4444).to_s
+  ok, = check("baresip ctrl responding on port #{port}") do
+    begin
+      sock = TCPSocket.new('127.0.0.1', port.to_i)
+      sock.close
+      [true, nil]
+    rescue Errno::ECONNREFUSED
+      [false, 'connection refused (is baresip running?)']
+    end
+  end
+  ok ? pass += 1 : fail_count += 1
+end
+
+# ---------- 4. .env.local secrets ----------
+puts "\n\e[1mSecrets (.env.local)\e[0m"
+required_vars = %w[
+  SIP_USERNAME
+  SIP_PASSWORD
+  SIP_SERVER
+  HUMAN_NUMBER
+]
+
+required_vars.each do |var|
+  ok, = check(var) do
+    val = ENV[var]
+    if val && !val.empty?
+      [true, nil]
+    else
+      [false, 'not set']
+    end
+  end
+  ok ? pass += 1 : fail_count += 1
+end
+
+# ---------- 5. VoIP Provider ----------
+voip_provider = Config.fetch(:voip, :provider) rescue 'unknown'
+puts "\n\e[1mVoIP Provider (#{voip_provider})\e[0m"
+
+if voip_provider == 'voipms'
+  %w[VOIPMS_API_USERNAME VOIPMS_API_PASSWORD VOIPMS_DID].each do |var|
+    ok, = check(var) do
+      val = ENV[var]
+      val && !val.empty? ? [true, nil] : [false, 'not set']
+    end
+    ok ? pass += 1 : fail_count += 1
+  end
+
+  ok, = check('API connection') do
+    username = ENV['VOIPMS_API_USERNAME']
+    password = ENV['VOIPMS_API_PASSWORD']
+    unless username && password
+      next [false, 'missing credentials']
+    end
+
+    uri = URI('https://voip.ms/api/v1/rest.php')
+    uri.query = URI.encode_www_form(
+      api_username: username,
+      api_password: password,
+      method: 'getBalance',
+      content_type: 'json'
+    )
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.open_timeout = 5
+    http.read_timeout = 5
+    response = http.request(Net::HTTP::Get.new(uri))
+    body = JSON.parse(response.body)
+
+    if body['status'] == 'success'
+      [true, "balance: $#{body.dig('balance', 'current_balance')}"]
+    else
+      [false, "API returned: #{body['status']}"]
+    end
+  end
+  ok ? pass += 1 : fail_count += 1
+end
+
+# ---------- 6. Voice Agent ----------
+voice_agent = Config.fetch(:voice_agent, :provider) rescue 'unknown'
+puts "\n\e[1mVoice Agent (#{voice_agent})\e[0m"
+
+if voice_agent == 'grok'
+  ok, = check('XAI_API_KEY') do
+    val = ENV['XAI_API_KEY']
+    val && !val.empty? ? [true, nil] : [false, 'not set']
+  end
+  ok ? pass += 1 : fail_count += 1
+
+  ok, = check('xAI API connection') do
+    api_key = ENV['XAI_API_KEY']
+    next [false, 'XAI_API_KEY not set'] unless api_key && !api_key.empty?
+
+    uri = URI('https://api.x.ai/v1/models')
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.open_timeout = 5
+    http.read_timeout = 5
+    req = Net::HTTP::Get.new(uri)
+    req['Authorization'] = "Bearer #{api_key}"
+    response = http.request(req)
+
+    if response.code.to_i == 200
+      [true, nil]
+    else
+      body = JSON.parse(response.body) rescue {}
+      [false, "HTTP #{response.code}: #{body['error']&.dig('message') || response.body[0..80]}"]
+    end
+  end
+  ok ? pass += 1 : fail_count += 1
+end
+
+# ---------- 7. AI Assistant ----------
+ai_assistant = Config.fetch(:ai_assistant, :provider) rescue 'unknown'
+puts "\n\e[1mAI Assistant (#{ai_assistant})\e[0m"
+
+if ai_assistant == 'openclaw'
+  ok, = check('Gateway connection (127.0.0.1:18789)') do
+    token = ENV['OPENCLAW_GATEWAY_TOKEN'] || ENV['OPENCLAW_API_KEY']
+    token = `openclaw config get gateway.auth.token 2>/dev/null`.strip if token.nil? || token.empty?
+
+    uri = URI('http://127.0.0.1:18789/v1/chat/completions')
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.open_timeout = 3
+    http.read_timeout = 5
+
+    req = Net::HTTP::Post.new(uri.path)
+    req['Authorization'] = "Bearer #{token}" if token && !token.empty?
+    req['Content-Type'] = 'application/json'
+    req.body = JSON.generate({
+      model: ENV['OPENCLAW_MODEL'] || 'openclaw:main',
+      messages: [{ role: 'user', content: 'ping' }],
+      max_tokens: 1
+    })
+
+    response = http.request(req)
+
+    if response.code.to_i == 200
+      [true, nil]
+    else
+      [false, "HTTP #{response.code}: #{response.body[0..80]}"]
+    end
+  end
+  ok ? pass += 1 : fail_count += 1
+end
+
+# ---------- 8. Agent profiles ----------
+puts "\n\e[1mAgent Profiles\e[0m"
+ok, = check("default agent: #{Config.fetch(:default_agent) rescue 'not set'}") do
+  profile = Config.agent
+  [profile && profile['name'] && profile['voice'] && profile['personality'],
+   profile ? nil : 'invalid profile']
+end
+ok ? pass += 1 : fail_count += 1
+
+# ---------- Summary ----------
+total = pass + fail_count
+puts "\n\e[1m#{pass}/#{total} checks passed\e[0m"
+exit(fail_count > 0 ? 1 : 0)

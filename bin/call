@@ -1,0 +1,88 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'dotenv'
+Dotenv.load(File.expand_path('../.env.local', __dir__))
+
+require_relative '../lib/call_session'
+
+def usage
+  puts <<~USAGE
+    Usage: bin/call <command> [args]
+
+    Commands:
+      <number>          Call a phone number (e.g., bin/call 5550100)
+      status            Check registration status
+      hangup            Hang up active call
+      calls             List active calls
+
+    Options:
+      --agent <name>         Select agent profile (default: from config)
+      --instructions "..."   Override personality (keeps agent's voice/name)
+      --verbose              Show debug output (timestamps, events, audio stats)
+
+    Examples:
+      bin/call 5550100                    # Call with default agent
+      bin/call 5550100 --agent jarvis     # Call as Jarvis
+      bin/call 5550100 --agent ara --instructions "You are Norm. Tell the moth joke."
+      bin/call 5550100 --verbose          # Call with debug logging
+      bin/call status                        # Check if registered
+      bin/call hangup                        # End call
+  USAGE
+  exit 1
+end
+
+usage if ARGV.empty?
+
+verbose    = ARGV.delete('--verbose')
+agent_name = nil
+if idx = ARGV.index('--agent')
+  ARGV.delete_at(idx)
+  agent_name = ARGV.delete_at(idx)
+end
+
+instructions = nil
+if idx = ARGV.index('--instructions')
+  ARGV.delete_at(idx)
+  instructions = ARGV.delete_at(idx)
+end
+
+command = ARGV[0]
+
+case command
+when 'status'
+  result = CallSession.sip_client.status
+  puts result[:registered] ? "Registered" : "Not registered"
+  puts result[:response]
+
+when 'hangup'
+  CallSession.sip_client.hangup
+  puts "Hung up"
+
+when 'calls'
+  calls = CallSession.sip_client.calls
+  if calls.empty?
+    puts "No active calls"
+  else
+    calls.each do |call|
+      puts "Line #{call[:line]}: #{call[:state]} #{call[:duration]} -> #{call[:uri]}"
+    end
+  end
+
+else
+  number = command
+
+  log_dir = File.expand_path('../logs', __dir__)
+  transcript_path = File.join(log_dir, "call-#{Time.now.strftime('%Y%m%d-%H%M%S')}.txt")
+
+  session = CallSession.build(
+    number: number, agent: agent_name, verbose: verbose,
+    transcript_path: transcript_path, instructions: instructions
+  )
+  session.on(:output) { |msg| puts msg }
+  session.on(:log)    { |msg| $stderr.puts msg }
+  trap('INT') { session.hangup }
+  session.start
+
+  puts "\nTranscript saved to #{transcript_path}" if File.exist?(transcript_path)
+end

@@ -1,0 +1,91 @@
+#!/bin/bash
+# API & Spending Monitor - checks provider usage, alerts on thresholds
+
+AUTH_FILE="$HOME/.openclaw/agents/main/agent/auth-profiles.json"
+ALERT_THRESHOLD_CLAUDE=90
+ALERT_THRESHOLD_SPEND=10
+ALERT_THRESHOLD_VOIPMS=5
+
+# Read auth profiles
+if [ ! -f "$AUTH_FILE" ]; then
+  echo "Error: auth-profiles.json not found"
+  exit 1
+fi
+
+# Extract Claude quota
+CLAUDE_QUOTA=$(jq -r '
+  .profiles["anthropic:default"].usage.quota.percentage // 0
+' "$AUTH_FILE")
+
+# Extract provider spending (xAI, Google, OpenAI)
+XAI_SPEND=$(jq -r '
+  .profiles["xai:default"].usage.cost.total // 0
+' "$AUTH_FILE")
+
+GOOGLE_SPEND=$(jq -r '
+  .profiles["google:default"].usage.cost.total // 0
+' "$AUTH_FILE")
+
+OPENAI_SPEND=$(jq -r '
+  .profiles["openai:default"].usage.cost.total // 0
+' "$AUTH_FILE")
+
+# Check voip.ms balance
+VOIPMS_BALANCE=$(curl -s "https://voip.ms/api/v1/rest.php?api_username=${VOIPMS_API_USERNAME}&api_password=${VOIPMS_API_PASSWORD}&method=getBalance&content_type=json" | jq -r '.balance // "0"')
+
+# Check for errors
+ERROR_COUNT=$(jq -r '
+  [.profiles[].usage.error_count // 0] | add
+' "$AUTH_FILE")
+
+# Determine if alert needed
+ALERT=false
+ALERT_MSG=""
+
+if (( $(echo "$CLAUDE_QUOTA > $ALERT_THRESHOLD_CLAUDE" | bc -l) )); then
+  ALERT=true
+  ALERT_MSG="${ALERT_MSG}⚠️ Claude quota at ${CLAUDE_QUOTA}%\n"
+fi
+
+if (( $(echo "$XAI_SPEND > $ALERT_THRESHOLD_SPEND" | bc -l) )); then
+  ALERT=true
+  ALERT_MSG="${ALERT_MSG}⚠️ xAI spending: \$${XAI_SPEND}\n"
+fi
+
+if (( $(echo "$GOOGLE_SPEND > $ALERT_THRESHOLD_SPEND" | bc -l) )); then
+  ALERT=true
+  ALERT_MSG="${ALERT_MSG}⚠️ Google spending: \$${GOOGLE_SPEND}\n"
+fi
+
+if (( $(echo "$OPENAI_SPEND > $ALERT_THRESHOLD_SPEND" | bc -l) )); then
+  ALERT=true
+  ALERT_MSG="${ALERT_MSG}⚠️ OpenAI spending: \$${OPENAI_SPEND}\n"
+fi
+
+if (( $(echo "$VOIPMS_BALANCE < $ALERT_THRESHOLD_VOIPMS" | bc -l) )); then
+  ALERT=true
+  ALERT_MSG="${ALERT_MSG}⚠️ voip.ms balance low: \$${VOIPMS_BALANCE}\n"
+fi
+
+if [ "$ERROR_COUNT" -gt 0 ]; then
+  ALERT=true
+  ALERT_MSG="${ALERT_MSG}⚠️ Provider errors: ${ERROR_COUNT}\n"
+fi
+
+# Log status
+echo "$(date): Claude ${CLAUDE_QUOTA}% | xAI \$${XAI_SPEND} | Google \$${GOOGLE_SPEND} | OpenAI \$${OPENAI_SPEND} | voip.ms \$${VOIPMS_BALANCE} | Errors: ${ERROR_COUNT}"
+
+# Alert if needed
+if [ "$ALERT" = true ]; then
+  echo -e "$ALERT_MSG"
+  
+  GATEWAY_TOKEN=$(jq -r '.gateway.auth.token' ~/.openclaw/openclaw.json)
+  curl -s -X POST http://localhost:18789/sessions/spawn \
+    -H "Authorization: Bearer $GATEWAY_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"task\": \"API usage alert:\\n${ALERT_MSG}\",
+      \"model\": \"haiku\",
+      \"cleanup\": \"delete\"
+    }"
+fi

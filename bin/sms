@@ -1,0 +1,39 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'dotenv'
+Dotenv.load(File.expand_path('../.env.local', __dir__))
+
+require_relative '../lib/sms'
+
+def usage
+  puts "Usage: #{File.basename($0)} <to> <message>"
+  puts ""
+  puts "Examples:"
+  puts "  #{File.basename($0)} 5550100 \"Hello!\""
+  puts "  #{File.basename($0)} +15550100 \"Testing SMS\""
+  puts ""
+  puts "Environment (from .env.local):"
+  puts "  SIP_USERNAME, SIP_PASSWORD, VOIPMS_DID"
+  exit 1
+end
+
+usage if ARGV.size < 2
+
+to = ARGV[0]
+message = ARGV[1..-1].join(" ")
+
+sms = SMS.from_env
+
+puts "Sending SMS from #{ENV['VOIPMS_DID']} to #{to}..."
+puts "Message: #{message}"
+puts ""
+
+begin
+  result = sms.send(to: to, message: message)
+  puts "✅ SMS sent successfully!"
+  puts "   Message ID: #{result['sms']}" if result['sms']
+rescue SMS::Error => e
+  puts "❌ SMS failed: #{e.message}"
+  exit 1
+end
