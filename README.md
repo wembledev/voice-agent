@@ -2,7 +2,7 @@
 
 AI voice agent that answers phone calls. Four pluggable pillars — swap any piece.
 
-Read more: [michaelwood.com](https://michaelwood.com)
+Read more: [Voice Agent: Norm Macdonald on the Phone](https://wemble.com/2026/02/16/voice-agent.html)
 
 ## Architecture
 
