@@ -6,8 +6,8 @@ STATE_DIR="$HOME/clawd/state"
 mkdir -p "$STATE_DIR"
 
 # Load credentials from .env.local
-if [ -f "$HOME/Projects/garbo-voice-agent/.env.local" ]; then
-  source "$HOME/Projects/garbo-voice-agent/.env.local"
+if [ -f "$HOME/Projects/voice-agent/.env.local" ]; then
+  source "$HOME/Projects/voice-agent/.env.local"
 fi
 
 VOIPMS_USER="${VOIPMS_API_USERNAME:-you@example.com}"
